@@ -1,0 +1,89 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum SubscriptionTier {
+  BASIC
+  PRO
+  ENTERPRISE
+}
+
+enum BillingCycle {
+  MONTHLY
+  YEARLY
+}
+
+// ---------------------------------------------------------------------------
+// Models
+// ---------------------------------------------------------------------------
+
+model User {
+  id        String   @id @default(uuid())
+  auth0Id   String   @unique
+  email     String   @unique
+  role      Role     @default(USER)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  chatMessages       ChatMessage[]
+  monthlyUsages      MonthlyUsage[]
+  subscriptionBundles SubscriptionBundle[]
+}
+
+model ChatMessage {
+  id               String   @id @default(uuid())
+  userId           String
+  question         String
+  answer           String
+  promptTokens     Int
+  completionTokens Int
+  totalTokens      Int
+  createdAt        DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+}
+
+model MonthlyUsage {
+  id     String @id @default(uuid())
+  userId String
+  month  Int    // 1-12
+  year   Int
+  count  Int    @default(0)
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@unique([userId, month, year])
+}
+
+model SubscriptionBundle {
+  id                String    @id @default(uuid())
+  userId            String
+  tier              SubscriptionTier
+  billingCycle      BillingCycle
+  maxMessages       Int
+  remainingMessages Int
+  price             Decimal
+  startDate         DateTime
+  endDate           DateTime
+  renewalDate       DateTime
+  autoRenew         Boolean   @default(true)
+  active            Boolean   @default(true)
+  cancelledAt       DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id])
+}
