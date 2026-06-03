@@ -1,11 +1,10 @@
 /**
- * SubscriptionApi.test.ts
- *
- * Integration tests for /api/v1/subscriptions and admin routes.
- * Auth0 is mocked as USER role. syncUser and SubscriptionRepository are mocked.
+ * Integration tests for /api/v1/subscriptions and admin subscription routes.
+ * Auth0 is mocked as USER role. syncUser and SubscriptionRepository are mocked
+ * to avoid real DB calls.
  */
 
-// ── Mocks ─────────────────────────────────────────────────────────────────
+// Mocks must be declared before any src imports
 import { mockAuth0 } from '../../mocks/auth0.mock';
 mockAuth0('USER');
 
@@ -52,11 +51,12 @@ jest.mock('../../../src/modules/subscriptions/repositories/SubscriptionRepositor
       cancel: jest.fn().mockResolvedValue(undefined),
       markInactive: jest.fn().mockResolvedValue(undefined),
       renew: jest.fn().mockResolvedValue(undefined),
+      getActiveBundles: jest.fn().mockResolvedValue([mockBundle]),
+      decrementRemainingMessages: jest.fn().mockResolvedValue(undefined),
     })),
   };
 });
 
-// ── Imports ───────────────────────────────────────────────────────────────
 import request from 'supertest';
 import { createApp } from '../../../src/app';
 
@@ -64,8 +64,6 @@ const app    = createApp();
 const BEARER = 'Bearer test-token';
 
 describe('Subscription API', () => {
-  // ── POST /api/v1/subscriptions ───────────────────────────────────────────
-
   it('POST /api/v1/subscriptions returns 201 for valid BASIC MONTHLY bundle', async () => {
     const res = await request(app)
       .post('/api/v1/subscriptions')
@@ -99,8 +97,6 @@ describe('Subscription API', () => {
     expect(res.status).toBe(401);
   });
 
-  // ── GET /api/v1/subscriptions ────────────────────────────────────────────
-
   it('GET /api/v1/subscriptions returns 200 with an array', async () => {
     const res = await request(app)
       .get('/api/v1/subscriptions')
@@ -110,8 +106,7 @@ describe('Subscription API', () => {
     expect(Array.isArray(res.body.data)).toBe(true);
   });
 
-  // ── Admin routes (USER role → 403) ───────────────────────────────────────
-
+  // USER role should be blocked from all admin endpoints
   it('GET /api/v1/admin/subscriptions returns 403 for USER role', async () => {
     const res = await request(app)
       .get('/api/v1/admin/subscriptions')

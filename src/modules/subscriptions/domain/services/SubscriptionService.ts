@@ -8,24 +8,13 @@ import {
 import { BillingPolicy } from '../policies/BillingPolicy';
 import { AppError } from '../../../../shared/errors/AppError';
 
-// ---------------------------------------------------------------------------
-// Repository interface — pure domain contract, no Prisma/Express imports
-// ---------------------------------------------------------------------------
-
+// Repository contract — the service only depends on this interface,
+// never on the concrete Prisma implementation.
 export interface ISubscriptionRepository {
-  /** Persist a new bundle and return it fully populated. */
   createBundle(data: CreateBundleData): Promise<SubscriptionBundle>;
-
-  /** Find a bundle by id, optionally scoped to a userId. */
   findById(id: string, userId?: string): Promise<SubscriptionBundle | null>;
-
-  /** Return all bundles for a user. */
   findByUserId(userId: string): Promise<SubscriptionBundle[]>;
-
-  /** Return all active bundles whose renewalDate <= now. */
   findDueForRenewal(): Promise<SubscriptionBundle[]>;
-
-  /** Partially update a bundle. */
   update(id: string, data: Partial<SubscriptionBundle>): Promise<SubscriptionBundle>;
 }
 
@@ -43,26 +32,15 @@ export interface CreateBundleData {
   active: boolean;
 }
 
-// ---------------------------------------------------------------------------
-// SubscriptionService
-// ---------------------------------------------------------------------------
-
-/**
- * Orchestrates all subscription use-cases.
- * Pure domain service — no Express or Prisma imports.
- */
+// Orchestrates all subscription lifecycle use-cases.
+// Pure domain — no Express or Prisma imports allowed here.
 export class SubscriptionService {
   private readonly billingPolicy = new BillingPolicy();
 
   constructor(private readonly subscriptionRepository: ISubscriptionRepository) {}
 
-  // -------------------------------------------------------------------------
-  // createBundle
-  // -------------------------------------------------------------------------
-
-  /**
-   * Creates a new subscription bundle with correct dates, price, and quota.
-   */
+  // Creates a bundle with the right dates, price, and message quota
+  // derived from the chosen tier and billing cycle.
   async createBundle(
     userId: string,
     tier: SubscriptionTier,
@@ -80,6 +58,8 @@ export class SubscriptionService {
       tier,
       billingCycle,
       maxMessages,
+      // Enterprise is unlimited (-1); store MAX_SAFE_INTEGER so the DB
+      // integer column doesn't need a NULL / special-case check.
       remainingMessages: maxMessages === -1 ? Number.MAX_SAFE_INTEGER : maxMessages,
       price,
       startDate,
@@ -90,14 +70,9 @@ export class SubscriptionService {
     });
   }
 
-  // -------------------------------------------------------------------------
-  // cancelBundle
-  // -------------------------------------------------------------------------
-
-  /**
-   * Cancels a bundle by recording cancelledAt and disabling auto-renew.
-   * The bundle stays active until endDate — historical chat data is untouched.
-   */
+  // Records cancelledAt and disables auto-renew. The bundle stays active
+  // until its endDate so users get what they paid for; historical chat
+  // data is never touched.
   async cancelBundle(bundleId: string, userId: string): Promise<SubscriptionBundle> {
     const bundle = await this.subscriptionRepository.findById(bundleId, userId);
 
@@ -105,9 +80,13 @@ export class SubscriptionService {
       throw new AppError('Subscription bundle not found', 'SUBSCRIPTION_NOT_FOUND', 404);
     }
 
-    // Domain policy level authorization — verify ownership
+    // Ownership enforced at domain level — not just at the controller.
     if (bundle.userId !== userId) {
-      throw new AppError('Access denied: this subscription does not belong to you', 'FORBIDDEN', 403);
+      throw new AppError(
+        'Access denied: this subscription does not belong to you',
+        'FORBIDDEN',
+        403,
+      );
     }
 
     if (bundle.cancelledAt !== null) {
@@ -120,13 +99,7 @@ export class SubscriptionService {
     });
   }
 
-  // -------------------------------------------------------------------------
-  // toggleAutoRenew
-  // -------------------------------------------------------------------------
-
-  /**
-   * Enables or disables automatic renewal for a bundle.
-   */
+  // Flips autoRenew on or off. Ownership is verified before the update.
   async toggleAutoRenew(
     bundleId: string,
     userId: string,
@@ -138,35 +111,26 @@ export class SubscriptionService {
       throw new AppError('Subscription bundle not found', 'SUBSCRIPTION_NOT_FOUND', 404);
     }
 
-    // Domain policy level authorization — verify ownership
     if (bundle.userId !== userId) {
-      throw new AppError('Access denied: this subscription does not belong to you', 'FORBIDDEN', 403);
+      throw new AppError(
+        'Access denied: this subscription does not belong to you',
+        'FORBIDDEN',
+        403,
+      );
     }
 
     return this.subscriptionRepository.update(bundleId, { autoRenew: value });
   }
 
-  // -------------------------------------------------------------------------
-  // getUserBundles
-  // -------------------------------------------------------------------------
-
-  /**
-   * Returns all subscription bundles (active and cancelled) for a user.
-   */
+  // Returns all bundles (active and cancelled) for a user.
   async getUserBundles(userId: string): Promise<SubscriptionBundle[]> {
     return this.subscriptionRepository.findByUserId(userId);
   }
 
-  // -------------------------------------------------------------------------
-  // processRenewals
-  // -------------------------------------------------------------------------
-
-  /**
-   * Background job: loops over all bundles due for renewal and processes each.
-   *
-   * On payment success → reset remainingMessages, extend dates
-   * On payment failure → mark active=false (preserves all data)
-   */
+  // Renewal job — typically called by an admin endpoint or a cron trigger.
+  // Processes every bundle whose renewalDate has passed:
+  //   - payment success → extend dates, reset quota
+  //   - payment failure → mark inactive (data preserved)
   async processRenewals(): Promise<{ renewed: number; failed: number }> {
     const dueBundles = await this.subscriptionRepository.findDueForRenewal();
 
@@ -174,33 +138,26 @@ export class SubscriptionService {
     let failed = 0;
 
     for (const bundle of dueBundles) {
-      if (!this.billingPolicy.shouldRenew(bundle)) {
-        continue;
-      }
+      if (!this.billingPolicy.shouldRenew(bundle)) continue;
 
-      const paymentSuccess = this.billingPolicy.simulatePayment();
+      const paid = this.billingPolicy.simulatePayment();
 
-      if (!paymentSuccess) {
-        // Payment failed — deactivate but preserve all data
+      if (!paid) {
         await this.subscriptionRepository.update(bundle.id, { active: false });
         failed++;
         continue;
       }
 
-      // Payment succeeded — extend period and reset quota
-      const newStartDate = new Date();
-      const newEndDate = this.billingPolicy.calculateEndDate(
-        newStartDate,
-        bundle.billingCycle,
-      );
-      const newRenewalDate = this.billingPolicy.calculateRenewalDate(newEndDate);
-      const maxMessages = getMaxMessages(bundle.tier);
+      const newStart = new Date();
+      const newEnd = this.billingPolicy.calculateEndDate(newStart, bundle.billingCycle);
+      const newRenewal = this.billingPolicy.calculateRenewalDate(newEnd);
+      const max = getMaxMessages(bundle.tier);
 
       await this.subscriptionRepository.update(bundle.id, {
-        startDate: newStartDate,
-        endDate: newEndDate,
-        renewalDate: newRenewalDate,
-        remainingMessages: maxMessages === -1 ? Number.MAX_SAFE_INTEGER : maxMessages,
+        startDate: newStart,
+        endDate: newEnd,
+        renewalDate: newRenewal,
+        remainingMessages: max === -1 ? Number.MAX_SAFE_INTEGER : max,
         active: true,
       });
 

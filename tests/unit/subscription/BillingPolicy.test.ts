@@ -1,12 +1,10 @@
 import { BillingPolicy } from '../../../src/modules/subscriptions/domain/policies/BillingPolicy';
 import type { SubscriptionBundle } from '../../../src/modules/subscriptions/domain/entities/SubscriptionBundle';
 
-// ---------------------------------------------------------------------------
-// Helper — build a minimal SubscriptionBundle
-// ---------------------------------------------------------------------------
+// Builds a bundle that's already due for renewal by default (renewalDate in the past).
 function makeBundle(overrides: Partial<SubscriptionBundle> = {}): SubscriptionBundle {
   const now = new Date();
-  const past = new Date(now.getTime() - 1000); // 1 second ago
+  const past = new Date(now.getTime() - 1000);
 
   return {
     id: 'bundle-1',
@@ -18,7 +16,7 @@ function makeBundle(overrides: Partial<SubscriptionBundle> = {}): SubscriptionBu
     price: 29.99,
     startDate: new Date(now.getTime() - 30 * 24 * 3600 * 1000),
     endDate: past,
-    renewalDate: past, // due for renewal by default
+    renewalDate: past,
     autoRenew: true,
     active: true,
     cancelledAt: null,
@@ -28,9 +26,6 @@ function makeBundle(overrides: Partial<SubscriptionBundle> = {}): SubscriptionBu
   };
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 describe('BillingPolicy', () => {
   let policy: BillingPolicy;
 
@@ -38,7 +33,6 @@ describe('BillingPolicy', () => {
     policy = new BillingPolicy();
   });
 
-  // ── calculateEndDate ───────────────────────────────────────────────────────
   describe('calculateEndDate', () => {
     it('adds exactly 1 month for MONTHLY billing', () => {
       const start = new Date('2025-01-15T00:00:00.000Z');
@@ -66,43 +60,34 @@ describe('BillingPolicy', () => {
     });
   });
 
-  // ── shouldRenew ────────────────────────────────────────────────────────────
   describe('shouldRenew', () => {
     it('returns true when all renewal conditions are met', () => {
-      const bundle = makeBundle(); // renewalDate is in the past, all flags set
-      expect(policy.shouldRenew(bundle)).toBe(true);
+      expect(policy.shouldRenew(makeBundle())).toBe(true);
     });
 
     it('returns false when autoRenew is false', () => {
-      const bundle = makeBundle({ autoRenew: false });
-      expect(policy.shouldRenew(bundle)).toBe(false);
+      expect(policy.shouldRenew(makeBundle({ autoRenew: false }))).toBe(false);
     });
 
     it('returns false when active is false', () => {
-      const bundle = makeBundle({ active: false });
-      expect(policy.shouldRenew(bundle)).toBe(false);
+      expect(policy.shouldRenew(makeBundle({ active: false }))).toBe(false);
     });
 
     it('returns false when cancelledAt is set', () => {
-      const bundle = makeBundle({ cancelledAt: new Date() });
-      expect(policy.shouldRenew(bundle)).toBe(false);
+      expect(policy.shouldRenew(makeBundle({ cancelledAt: new Date() }))).toBe(false);
     });
 
     it('returns false when renewalDate is in the future', () => {
-      const future = new Date(Date.now() + 7 * 24 * 3600 * 1000); // 7 days ahead
-      const bundle = makeBundle({ renewalDate: future });
-      expect(policy.shouldRenew(bundle)).toBe(false);
+      const future = new Date(Date.now() + 7 * 24 * 3600 * 1000);
+      expect(policy.shouldRenew(makeBundle({ renewalDate: future }))).toBe(false);
     });
 
-    it('returns true when renewalDate is exactly now (boundary)', () => {
-      // Slightly in the past to avoid flaky race with new Date() inside shouldRenew
+    it('returns true when renewalDate is just in the past (boundary check)', () => {
       const justPast = new Date(Date.now() - 10);
-      const bundle   = makeBundle({ renewalDate: justPast });
-      expect(policy.shouldRenew(bundle)).toBe(true);
+      expect(policy.shouldRenew(makeBundle({ renewalDate: justPast }))).toBe(true);
     });
   });
 
-  // ── calculateRenewalDate ───────────────────────────────────────────────────
   describe('calculateRenewalDate', () => {
     it('returns a date equal to endDate', () => {
       const end     = new Date('2026-01-01T00:00:00.000Z');
@@ -110,7 +95,7 @@ describe('BillingPolicy', () => {
       expect(renewal.getTime()).toBe(end.getTime());
     });
 
-    it('returns a new Date object (not the same reference)', () => {
+    it('returns a new Date object, not the same reference', () => {
       const end     = new Date('2026-01-01T00:00:00.000Z');
       const renewal = policy.calculateRenewalDate(end);
       expect(renewal).not.toBe(end);

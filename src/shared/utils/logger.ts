@@ -3,14 +3,10 @@ import { Request, Response, NextFunction } from 'express';
 import { config } from '../../infrastructure/config/env';
 import { generateRequestId } from './requestId';
 
-// ---------------------------------------------------------------------------
-// Base logger — used throughout the application
-// ---------------------------------------------------------------------------
 export const logger = pino({ level: config.LOG_LEVEL });
 
-// ---------------------------------------------------------------------------
-// Extend Express Request so TypeScript knows about requestId and userId
-// ---------------------------------------------------------------------------
+// Augment the Express Request type so TypeScript knows about the fields we
+// attach in this middleware.
 declare global {
   namespace Express {
     interface Request {
@@ -20,21 +16,12 @@ declare global {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Per-request logging middleware
-// ---------------------------------------------------------------------------
-
-/**
- * Attaches a unique requestId to every incoming request and logs method,
- * path, statusCode, responseTime, requestId, and userId (when available)
- * once the response finishes.
- */
+// Attaches a requestId to every request and logs method, path, status,
+// and response time once the response finishes.
 export function requestLogger(req: Request, res: Response, next: NextFunction): void {
-  // Honour any upstream request-id (e.g. from a load-balancer), otherwise generate one
   req.requestId =
     (req.headers['x-request-id'] as string | undefined) ?? generateRequestId();
 
-  // Stamp the response so clients can correlate logs
   res.setHeader('X-Request-Id', req.requestId);
 
   const startAt = process.hrtime.bigint();

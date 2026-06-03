@@ -6,11 +6,8 @@ import { config } from '../../infrastructure/config/env';
 
 const logger = pino({ level: config.LOG_LEVEL });
 
-/**
- * Global error-handling middleware (must have exactly 4 parameters).
- * Catches AppError subclasses and unknown errors, returning a structured
- * JSON response in all cases.
- */
+// Must have exactly 4 parameters — Express uses that signature to identify
+// error-handling middleware.
 export function errorHandler(
   err: unknown,
   req: Request,
@@ -38,7 +35,7 @@ export function errorHandler(
     return;
   }
 
-  // Unknown / unexpected error
+  // Anything that isn't an AppError is unexpected — log at error level.
   logger.error(
     { err, requestId, path: req.path, method: req.method },
     'Unhandled error',

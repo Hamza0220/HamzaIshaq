@@ -4,9 +4,8 @@ import { mockOpenAIResponse } from '../../../../infrastructure/openai/mockOpenAI
 import { QuotaExhaustedError } from '../../../../shared/errors/QuotaExhaustedError';
 import { AppError } from '../../../../shared/errors/AppError';
 
-// ---------------------------------------------------------------------------
-// Repository interfaces — pure domain contracts, no Prisma/Express imports
-// ---------------------------------------------------------------------------
+// Repository contracts — defined here so the domain layer stays independent
+// of any concrete implementation (Prisma, in-memory, etc.)
 
 export interface MonthlyUsageRecord {
   id: string;
@@ -17,36 +16,25 @@ export interface MonthlyUsageRecord {
 }
 
 export interface IChatRepository {
-  /** Find the current monthly usage record for a user. Returns null if none exists. */
   getMonthlyUsage(userId: string, month: number, year: number): Promise<MonthlyUsageRecord | null>;
-  /** Upsert the monthly usage count for the current period. */
   incrementMonthlyUsage(userId: string, month: number, year: number): Promise<void>;
-  /** Persist a new chat message and return it with all fields populated. */
   saveMessage(data: Omit<ChatMessage, 'id' | 'createdAt'>): Promise<ChatMessage>;
 }
 
 export interface ISubscriptionRepository {
-  /** Return all active, non-cancelled bundles for a user. */
   getActiveBundles(userId: string): Promise<SubscriptionBundle[]>;
-  /** Decrement remainingMessages by 1 for the given bundle. */
   decrementRemainingMessages(bundleId: string): Promise<void>;
 }
 
-// ---------------------------------------------------------------------------
-// ChatService
-// ---------------------------------------------------------------------------
-
-/**
- * Orchestrates the full message-sending flow:
- *   1. Check free monthly quota (3 messages/month)
- *   2. If exhausted, pick an active subscription bundle
- *   3. If no bundle available, throw QuotaExhaustedError
- *   4. Call the (mock) AI
- *   5. Persist the message
- *   6. Return the saved message
- *
- * Pure domain service — no Express or Prisma imports.
- */
+// ChatService orchestrates the full send-message flow:
+//   1. Check free monthly quota
+//   2. Fall back to subscription bundle if quota is exhausted
+//   3. Throw QuotaExhaustedError if nothing is available
+//   4. Call the mock AI
+//   5. Persist the message and update counters
+//   6. Return the saved record
+//
+// No Express or Prisma imports — pure domain logic.
 export class ChatService {
   private readonly quotaPolicy = new QuotaPolicy();
 
@@ -56,27 +44,23 @@ export class ChatService {
   ) {}
 
   async sendMessage(userId: string, question: string, requestingUserId?: string): Promise<ChatMessage> {
-    // Domain policy level authorization — enforce ownership
-    // A user may only send messages on their own behalf (not as another user)
+    // Domain-level ownership check — a user cannot send on behalf of someone else.
     if (requestingUserId !== undefined && requestingUserId !== userId) {
-      throw new AppError('Access denied: cannot send messages on behalf of another user', 'FORBIDDEN', 403);
+      throw new AppError(
+        'Access denied: cannot send messages on behalf of another user',
+        'FORBIDDEN',
+        403,
+      );
     }
 
     const now = new Date();
-    const currentMonth = now.getMonth() + 1; // 1-12
+    const currentMonth = now.getMonth() + 1; // getMonth() is 0-indexed
     const currentYear = now.getFullYear();
 
-    // ------------------------------------------------------------------
-    // Step 1: Check free tier quota
-    // ------------------------------------------------------------------
-    const usage = await this.chatRepository.getMonthlyUsage(
-      userId,
-      currentMonth,
-      currentYear,
-    );
+    const usage = await this.chatRepository.getMonthlyUsage(userId, currentMonth, currentYear);
 
-    // If the stored record belongs to a past month/year treat the count as 0
-    // (new billing period — free quota resets automatically)
+    // If the stored record is from a previous billing period, treat count as 0
+    // so the free quota resets automatically at the start of a new month.
     const effectiveCount =
       usage && usage.month === currentMonth && usage.year === currentYear
         ? usage.count
@@ -84,16 +68,12 @@ export class ChatService {
 
     const usingFreeTier = this.quotaPolicy.canUseFreeTier(effectiveCount);
 
-    // ------------------------------------------------------------------
-    // Step 2: If free quota exhausted, pick a bundle
-    // ------------------------------------------------------------------
     let selectedBundle: SubscriptionBundle | null = null;
 
     if (!usingFreeTier) {
       const bundles = await this.subscriptionRepository.getActiveBundles(userId);
       selectedBundle = this.quotaPolicy.selectBundle(bundles);
 
-      // Step 3: No eligible bundle — throw
       if (!selectedBundle) {
         throw new QuotaExhaustedError(
           'Free quota exhausted and no active subscription bundle available',
@@ -101,14 +81,8 @@ export class ChatService {
       }
     }
 
-    // ------------------------------------------------------------------
-    // Step 4: Call the mock AI
-    // ------------------------------------------------------------------
     const aiResponse = await mockOpenAIResponse(question);
 
-    // ------------------------------------------------------------------
-    // Step 5: Persist the message and update counters
-    // ------------------------------------------------------------------
     const saved = await this.chatRepository.saveMessage({
       userId,
       question,
@@ -119,16 +93,12 @@ export class ChatService {
     });
 
     if (usingFreeTier) {
-      // Increment free-tier usage counter
       await this.chatRepository.incrementMonthlyUsage(userId, currentMonth, currentYear);
     } else if (selectedBundle && !this.quotaPolicy.isEnterpriseUnlimited(selectedBundle.tier)) {
-      // Decrement paid bundle only for non-Enterprise (Enterprise is unlimited)
+      // Enterprise bundles are unlimited — only deduct from Basic/Pro
       await this.subscriptionRepository.decrementRemainingMessages(selectedBundle.id);
     }
 
-    // ------------------------------------------------------------------
-    // Step 6: Return the saved message
-    // ------------------------------------------------------------------
     return saved;
   }
 }

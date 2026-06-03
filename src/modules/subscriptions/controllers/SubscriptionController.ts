@@ -7,10 +7,7 @@ import { subscriptionRateLimit } from '../../../shared/middleware/rateLimit.midd
 import { SubscriptionService } from '../domain/services/SubscriptionService';
 import { SubscriptionRepository } from '../repositories/SubscriptionRepository';
 import { AppError } from '../../../shared/errors/AppError';
-
-// ---------------------------------------------------------------------------
-// Validation schema
-// ---------------------------------------------------------------------------
+import type { AuthRequest } from '../../../shared/types/AuthRequest';
 
 export const CreateSubscriptionSchema = z
   .object({
@@ -22,15 +19,8 @@ export const CreateSubscriptionSchema = z
 
 export type CreateSubscriptionRequest = z.infer<typeof CreateSubscriptionSchema>;
 
-// ---------------------------------------------------------------------------
-// Helper — extract Auth0 subject from verified JWT
-// ---------------------------------------------------------------------------
-
-type AuthRequest = Request & {
-  auth?: { payload?: { sub?: string } };
-  dbUser?: { id: string; email: string; role: string };
-};
-
+// Picks the internal DB user id from the request, falling back to the raw
+// Auth0 sub if syncUser hasn't run (shouldn't happen in production).
 function getSubject(req: AuthRequest): string {
   if (req.dbUser?.id) return req.dbUser.id;
   const sub = req.auth?.payload?.sub;
@@ -38,26 +28,18 @@ function getSubject(req: AuthRequest): string {
   return sub;
 }
 
+// Express can return a header value as string | string[] | undefined.
+// This helper normalises it to a plain string.
 function resolveId(raw: string | string[] | undefined): string {
   if (Array.isArray(raw)) return raw[0] ?? '';
   return raw ?? '';
 }
 
-// ---------------------------------------------------------------------------
-// Router factories
-// ---------------------------------------------------------------------------
-
-/**
- * Returns the Express Router for /api/v1/subscriptions (user routes).
- */
+// User-facing routes: /api/v1/subscriptions
 export function createSubscriptionRouter(): Router {
   const router = Router();
   const repo = new SubscriptionRepository();
   const service = new SubscriptionService(repo);
-
-  // -------------------------------------------------------------------------
-  // POST /api/v1/subscriptions — create a new bundle
-  // -------------------------------------------------------------------------
 
   /**
    * @swagger
@@ -105,8 +87,7 @@ export function createSubscriptionRouter(): Router {
     async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
       try {
         const userId = getSubject(req);
-        const { tier, billingCycle, autoRenew } =
-          req.body as CreateSubscriptionRequest;
+        const { tier, billingCycle, autoRenew } = req.body as CreateSubscriptionRequest;
 
         const bundle = await service.createBundle(userId, tier, billingCycle, autoRenew);
         res.status(201).json({ data: bundle });
@@ -115,10 +96,6 @@ export function createSubscriptionRouter(): Router {
       }
     },
   );
-
-  // -------------------------------------------------------------------------
-  // GET /api/v1/subscriptions — list own bundles
-  // -------------------------------------------------------------------------
 
   /**
    * @swagger
@@ -161,10 +138,6 @@ export function createSubscriptionRouter(): Router {
       }
     },
   );
-
-  // -------------------------------------------------------------------------
-  // GET /api/v1/subscriptions/:id — single bundle (own only)
-  // -------------------------------------------------------------------------
 
   /**
    * @swagger
@@ -227,10 +200,6 @@ export function createSubscriptionRouter(): Router {
     },
   );
 
-  // -------------------------------------------------------------------------
-  // PATCH /api/v1/subscriptions/:id/cancel
-  // -------------------------------------------------------------------------
-
   /**
    * @swagger
    * /api/v1/subscriptions/{id}/cancel:
@@ -290,10 +259,6 @@ export function createSubscriptionRouter(): Router {
     },
   );
 
-  // -------------------------------------------------------------------------
-  // PATCH /api/v1/subscriptions/:id/auto-renew
-  // -------------------------------------------------------------------------
-
   /**
    * @swagger
    * /api/v1/subscriptions/{id}/auto-renew:
@@ -337,9 +302,7 @@ export function createSubscriptionRouter(): Router {
   router.patch(
     '/:id/auto-renew',
     verifyToken,
-    validate(
-      z.object({ autoRenew: z.boolean() }).strict(),
-    ),
+    validate(z.object({ autoRenew: z.boolean() }).strict()),
     async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
       try {
         const userId = getSubject(req);
@@ -357,17 +320,11 @@ export function createSubscriptionRouter(): Router {
   return router;
 }
 
-/**
- * Returns the Express Router for /api/v1/admin/subscriptions (admin routes).
- */
+// Admin routes: /api/v1/admin/subscriptions
 export function createAdminSubscriptionRouter(): Router {
   const router = Router();
   const repo = new SubscriptionRepository();
   const service = new SubscriptionService(repo);
-
-  // -------------------------------------------------------------------------
-  // GET /api/v1/admin/subscriptions — all bundles
-  // -------------------------------------------------------------------------
 
   /**
    * @swagger
@@ -416,10 +373,6 @@ export function createAdminSubscriptionRouter(): Router {
       }
     },
   );
-
-  // -------------------------------------------------------------------------
-  // POST /api/v1/admin/subscriptions/process-renewals
-  // -------------------------------------------------------------------------
 
   /**
    * @swagger

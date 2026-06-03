@@ -11,10 +11,7 @@ import {
   CreateBundleData,
 } from '../domain/services/SubscriptionService';
 
-// ---------------------------------------------------------------------------
-// Prisma singleton via adapter (Prisma v7 pattern)
-// ---------------------------------------------------------------------------
-
+// Prisma client is a module-level singleton — shared across requests.
 function createPrismaClient(): PrismaClient {
   const pool = new Pool({ connectionString: process.env['DATABASE_URL'] });
   const adapter = new PrismaPg(pool);
@@ -23,18 +20,9 @@ function createPrismaClient(): PrismaClient {
 
 const prisma = createPrismaClient();
 
-// ---------------------------------------------------------------------------
-// Repository
-// ---------------------------------------------------------------------------
-
-/**
- * Concrete Prisma implementation of ISubscriptionRepository.
- * Also exposes additional methods required by the controller.
- */
+// Concrete Prisma implementation of ISubscriptionRepository.
+// Also exposes additional controller-level and chat-module methods.
 export class SubscriptionRepository implements ISubscriptionRepository {
-  // -------------------------------------------------------------------------
-  // ISubscriptionRepository contract
-  // -------------------------------------------------------------------------
 
   async createBundle(data: CreateBundleData): Promise<SubscriptionBundle> {
     const record = await prisma.subscriptionBundle.create({
@@ -116,9 +104,7 @@ export class SubscriptionRepository implements ISubscriptionRepository {
     return this.toDomain(record);
   }
 
-  // -------------------------------------------------------------------------
   // Additional controller-level methods
-  // -------------------------------------------------------------------------
 
   /** Return all active bundles for a user (used by quota checks). */
   async findActiveByUserId(userId: string): Promise<SubscriptionBundle[]> {
@@ -128,6 +114,27 @@ export class SubscriptionRepository implements ISubscriptionRepository {
     });
 
     return records.map((r) => this.toDomain(r));
+  }
+
+  // These two methods implement the IChatRepository.ISubscriptionRepository
+  // contract that ChatService depends on. Keeping them here avoids a stub
+  // in the chat controller and lets both modules share the same Prisma client.
+
+  // Returns active, non-cancelled bundles for the quota check in ChatService.
+  async getActiveBundles(userId: string): Promise<SubscriptionBundle[]> {
+    return this.findActiveByUserId(userId);
+  }
+
+  // Delegates to the atomic deduction method on ChatRepository via Prisma.
+  // We use the serializable transaction path already implemented in
+  // ChatRepository.deductBundleQuota for consistency, but for the interface
+  // contract we do a simple decrement here (ChatService calls decrementRemainingMessages,
+  // not deductBundleQuota directly).
+  async decrementRemainingMessages(bundleId: string): Promise<void> {
+    await prisma.subscriptionBundle.update({
+      where: { id: bundleId },
+      data: { remainingMessages: { decrement: 1 } },
+    });
   }
 
   /** Admin: return all bundles across all users. */
@@ -174,9 +181,7 @@ export class SubscriptionRepository implements ISubscriptionRepository {
     });
   }
 
-  // -------------------------------------------------------------------------
-  // Mapper: Prisma record → domain entity
-  // -------------------------------------------------------------------------
+  // Maps a Prisma record to the domain entity.
 
   private toDomain(record: {
     id: string;

@@ -1,9 +1,7 @@
 import { QuotaPolicy } from '../../../src/modules/chat/domain/policies/QuotaPolicy';
 import type { SubscriptionBundle } from '../../../src/modules/chat/domain/policies/QuotaPolicy';
 
-// ---------------------------------------------------------------------------
-// Helper — build a minimal SubscriptionBundle for tests
-// ---------------------------------------------------------------------------
+// Builds a minimal SubscriptionBundle with sensible defaults for tests.
 function makeBundle(overrides: Partial<SubscriptionBundle> = {}): SubscriptionBundle {
   return {
     id: 'bundle-1',
@@ -25,9 +23,6 @@ function makeBundle(overrides: Partial<SubscriptionBundle> = {}): SubscriptionBu
   };
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 describe('QuotaPolicy', () => {
   let policy: QuotaPolicy;
 
@@ -35,7 +30,6 @@ describe('QuotaPolicy', () => {
     policy = new QuotaPolicy();
   });
 
-  // ── canUseFreeTier ─────────────────────────────────────────────────────────
   describe('canUseFreeTier', () => {
     it('returns true for count 0', () => {
       expect(policy.canUseFreeTier(0)).toBe(true);
@@ -58,7 +52,6 @@ describe('QuotaPolicy', () => {
     });
   });
 
-  // ── selectBundle ───────────────────────────────────────────────────────────
   describe('selectBundle', () => {
     it('returns null for an empty array', () => {
       expect(policy.selectBundle([])).toBeNull();
@@ -103,7 +96,6 @@ describe('QuotaPolicy', () => {
     });
   });
 
-  // ── isEnterpriseUnlimited ──────────────────────────────────────────────────
   describe('isEnterpriseUnlimited', () => {
     it('returns true for ENTERPRISE', () => {
       expect(policy.isEnterpriseUnlimited('ENTERPRISE')).toBe(true);

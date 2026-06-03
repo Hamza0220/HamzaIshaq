@@ -1,23 +1,16 @@
 import { SubscriptionBundle, BillingCycle } from '../entities/SubscriptionBundle';
 
-/**
- * Encapsulates all billing business rules.
- * Pure TypeScript — no Express, Prisma, or framework imports.
- */
+// All billing business rules in one place.
+// No Express, no Prisma — pure domain logic.
 export class BillingPolicy {
-  /**
-   * Simulates a payment attempt.
-   * Returns true ~80% of the time (20% failure rate).
-   */
+  // Simulates a payment gateway call. Succeeds ~80% of the time.
+  // In a real system this would call Stripe/Paddle/etc.
   simulatePayment(): boolean {
     return Math.random() > 0.2;
   }
 
-  /**
-   * Calculates the subscription end date from a given start date.
-   * MONTHLY → add 1 calendar month
-   * YEARLY  → add 1 calendar year
-   */
+  // Adds 1 calendar month (MONTHLY) or 1 calendar year (YEARLY) to startDate.
+  // Returns a new Date without mutating the input.
   calculateEndDate(startDate: Date, cycle: BillingCycle): Date {
     const end = new Date(startDate);
 
@@ -30,13 +23,11 @@ export class BillingPolicy {
     return end;
   }
 
-  /**
-   * Returns true when all renewal conditions are met:
-   *   - autoRenew is enabled
-   *   - subscription is still active
-   *   - renewalDate is now or in the past
-   *   - subscription has NOT been cancelled
-   */
+  // A bundle should renew when:
+  //   - autoRenew is on
+  //   - it's still marked active
+  //   - renewalDate has passed
+  //   - it hasn't been explicitly cancelled
   shouldRenew(bundle: SubscriptionBundle): boolean {
     return (
       bundle.autoRenew === true &&
@@ -46,10 +37,7 @@ export class BillingPolicy {
     );
   }
 
-  /**
-   * The renewal date is the same as the subscription's end date —
-   * renewal is triggered when the current period expires.
-   */
+  // Renewal fires when the current period ends, so renewalDate === endDate.
   calculateRenewalDate(endDate: Date): Date {
     return new Date(endDate);
   }

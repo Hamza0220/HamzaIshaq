@@ -5,7 +5,7 @@
  * Auth0 is mocked. syncUser and mockOpenAI are mocked to avoid real DB/AI calls.
  */
 
-// ── Mocks (MUST be before any src imports) ────────────────────────────────
+// Mocks (MUST be before any src imports)
 import { mockAuth0 } from '../../mocks/auth0.mock';
 mockAuth0('USER');
 
@@ -51,7 +51,7 @@ jest.mock('../../../src/modules/chat/repositories/ChatRepository', () => {
   };
 });
 
-// ── Imports ───────────────────────────────────────────────────────────────
+// Imports
 import request from 'supertest';
 import { createApp } from '../../../src/app';
 
@@ -68,7 +68,7 @@ function validHeaders(nonce?: string) {
 }
 
 describe('Chat API', () => {
-  // ── POST /api/v1/chat ────────────────────────────────────────────────────
+  // POST /api/v1/chat
 
   it('POST /api/v1/chat returns 200 with chat data for valid request', async () => {
     const res = await request(app)

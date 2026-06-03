@@ -2,17 +2,10 @@ import { Request, Response, NextFunction } from 'express';
 
 type Role = 'USER' | 'ADMIN';
 
-/**
- * Returns a middleware that enforces the required role.
- * ADMIN can access both ADMIN and USER routes.
- * USER can only access USER routes.
- *
- * Expects the user's role to be available on req.auth?.payload
- * as the custom claim (set by Auth0 rule/action).
- */
+// ADMIN role satisfies any route requirement.
+// USER role only satisfies routes that require USER.
 export function requireRole(role: Role) {
   return (req: Request, res: Response, next: NextFunction): void => {
-    // express-oauth2-jwt-bearer populates req.auth after verifyToken runs
     const payload = (req as Request & { auth?: { payload?: Record<string, unknown> } }).auth
       ?.payload;
 
@@ -29,7 +22,6 @@ export function requireRole(role: Role) {
       return;
     }
 
-    // ADMIN satisfies any role requirement; USER only satisfies USER
     const hasAccess = userRole === 'ADMIN' || userRole === role;
 
     if (!hasAccess) {

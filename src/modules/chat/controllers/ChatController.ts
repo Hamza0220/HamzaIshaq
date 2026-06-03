@@ -1,4 +1,4 @@
-import { Router, Request, Response, NextFunction } from 'express';
+import { Router, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { verifyToken } from '../../../shared/middleware/auth.middleware';
 import { nonceValidation } from '../../../shared/middleware/nonce.middleware';
@@ -6,15 +6,11 @@ import { chatRateLimit } from '../../../shared/middleware/rateLimit.middleware';
 import { validate } from '../../../shared/middleware/validation.middleware';
 import { ChatService } from '../domain/services/ChatService';
 import { ChatRepository } from '../repositories/ChatRepository';
+import { SubscriptionRepository } from '../../subscriptions/repositories/SubscriptionRepository';
 import { AppError } from '../../../shared/errors/AppError';
+import type { AuthRequest } from '../../../shared/types/AuthRequest';
 
-// ---------------------------------------------------------------------------
-// Validation schema
-// ---------------------------------------------------------------------------
-
-/**
- * Strips HTML tags from a string (basic sanitisation — no external dep needed).
- */
+// Basic HTML stripping — avoids pulling in a sanitisation library for this.
 function stripHtml(value: string): string {
   return value.replace(/<[^>]*>/g, '');
 }
@@ -28,57 +24,25 @@ export const ChatRequestSchema = z
       .trim()
       .transform(stripHtml),
   })
-  .strict(); // reject unknown fields
+  .strict();
 
 export type ChatRequest = z.infer<typeof ChatRequestSchema>;
 
-// ---------------------------------------------------------------------------
-// Helper — extract Auth0 subject (user id) from verified JWT
-// ---------------------------------------------------------------------------
-
-type AuthRequest = Request & {
-  auth?: { payload?: { sub?: string } };
-  dbUser?: { id: string; email: string; role: string };
-};
-
+// Resolves the internal user ID from the request.
+// Prefers req.dbUser.id (set by syncUser middleware) because that's the UUID
+// foreign keys reference. Falls back to the raw Auth0 sub as a safety net.
 function getSubject(req: AuthRequest): string {
-  // Prefer the DB user id (set by syncUser middleware) — this is the internal UUID
-  // that foreign keys in ChatMessage etc. reference.
   if (req.dbUser?.id) return req.dbUser.id;
-  // Fallback to Auth0 sub (should not happen if syncUser is in the chain)
   const sub = req.auth?.payload?.sub;
   if (!sub) throw new AppError('Unable to identify user', 'UNAUTHORIZED', 401);
   return sub;
 }
 
-// ---------------------------------------------------------------------------
-// Router factory
-// ---------------------------------------------------------------------------
-
-/**
- * Returns an Express Router with all /api/v1/chat routes mounted.
- * Dependencies are created here; swap with DI container if needed.
- */
 export function createChatRouter(): Router {
   const router = Router();
   const chatRepository = new ChatRepository();
-
-  // SubscriptionRepository is a stub for now — provide a minimal adapter
-  // so ChatService compiles and runs until the subscription module is ready.
-  const subscriptionRepositoryStub = {
-    async getActiveBundles() {
-      return [];
-    },
-    async decrementRemainingMessages() {
-      // no-op until subscription module is implemented
-    },
-  };
-
-  const chatService = new ChatService(chatRepository, subscriptionRepositoryStub);
-
-  // -------------------------------------------------------------------------
-  // POST /api/v1/chat
-  // -------------------------------------------------------------------------
+  const subscriptionRepository = new SubscriptionRepository();
+  const chatService = new ChatService(chatRepository, subscriptionRepository);
 
   /**
    * @swagger
@@ -161,10 +125,8 @@ export function createChatRouter(): Router {
     },
   );
 
-  // -------------------------------------------------------------------------
-  // GET /api/v1/chat/history
-  // Must be registered BEFORE /:id to avoid matching "history" as an id
-  // -------------------------------------------------------------------------
+  // GET /history must be registered before /:id so Express doesn't treat
+  // the string "history" as a dynamic id parameter.
 
   /**
    * @swagger
@@ -201,19 +163,12 @@ export function createChatRouter(): Router {
       try {
         const userId = getSubject(req);
         const messages = await chatRepository.getByUserId(userId);
-
-        res.status(200).json({
-          data: messages,
-        });
+        res.status(200).json({ data: messages });
       } catch (err) {
         next(err);
       }
     },
   );
-
-  // -------------------------------------------------------------------------
-  // GET /api/v1/chat/:id
-  // -------------------------------------------------------------------------
 
   /**
    * @swagger

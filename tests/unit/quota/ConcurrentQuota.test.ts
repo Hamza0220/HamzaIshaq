@@ -31,9 +31,7 @@ import type { ISubscriptionRepository } from '../../../src/modules/chat/domain/s
 import type { SubscriptionBundle } from '../../../src/modules/chat/domain/policies/QuotaPolicy';
 import type { ChatMessage } from '../../../src/modules/chat/domain/entities/ChatMessage';
 
-// ---------------------------------------------------------------------------
 // Helper factories
-// ---------------------------------------------------------------------------
 
 function makeMessage(userId: string, question: string): ChatMessage {
   return {
@@ -69,9 +67,7 @@ function makeBundle(remaining: number): SubscriptionBundle {
   };
 }
 
-// ---------------------------------------------------------------------------
 // In-memory repositories
-// ---------------------------------------------------------------------------
 
 function buildChatRepo(freeCount: number): IChatRepository {
   const now = new Date();
@@ -114,9 +110,7 @@ function buildSubscriptionRepo(initialRemaining: number): ISubscriptionRepositor
   };
 }
 
-// ---------------------------------------------------------------------------
 // Test
-// ---------------------------------------------------------------------------
 
 describe('ConcurrentQuota', () => {
   it('allows exactly 1 success when 3 concurrent calls share 1 remaining quota', async () => {

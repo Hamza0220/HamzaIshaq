@@ -1,12 +1,11 @@
-/**
- * Minimal SubscriptionBundle shape required by quota logic.
- * Intentionally not imported from Prisma — pure domain type.
- */
+// Minimal bundle shape needed by quota logic.
+// Kept separate from the Prisma-generated type on purpose — the domain layer
+// should not know about the ORM.
 export interface SubscriptionBundle {
   id: string;
   userId: string;
-  tier: string;          // 'BASIC' | 'PRO' | 'ENTERPRISE'
-  billingCycle: string;  // 'MONTHLY' | 'YEARLY'
+  tier: string;
+  billingCycle: string;
   maxMessages: number;
   remainingMessages: number;
   price: number | { toNumber(): number };
@@ -20,61 +19,42 @@ export interface SubscriptionBundle {
   updatedAt: Date;
 }
 
-/**
- * Encapsulates all quota-related business rules.
- * Pure TypeScript — no Express, Prisma, or framework imports.
- */
+// All quota-related business rules live here.
+// No Express, no Prisma, no framework code.
 export class QuotaPolicy {
   private static readonly FREE_TIER_LIMIT = 3;
   private static readonly ENTERPRISE_TIER = 'ENTERPRISE';
 
-  /**
-   * Domain policy level authorization check.
-   * Ensures a user can only consume quota on their own account.
-   * Throws an error if the requesting user doesn't match the target user.
-   */
+  // Throws if requestingUserId is trying to consume quota for a different user.
   enforceOwnership(userId: string, requestingUserId: string): void {
     if (userId !== requestingUserId) {
-      throw new Error(`Access denied: user ${requestingUserId} cannot use quota for user ${userId}`);
+      throw new Error(
+        `Access denied: user ${requestingUserId} cannot use quota for user ${userId}`,
+      );
     }
   }
 
-  /**
-   * Returns true if the user is within the free monthly tier (count < 3).
-   */
+  // Returns true when the user still has free messages left this month.
   canUseFreeTier(currentCount: number): boolean {
     return currentCount < QuotaPolicy.FREE_TIER_LIMIT;
   }
 
-  /**
-   * Selects the best active bundle to consume a message from.
-   *
-   * Rules:
-   * - Sort bundles by remainingMessages DESC
-   * - ENTERPRISE tier is always returned regardless of remainingMessages
-   * - Otherwise return the first bundle with remainingMessages > 0
-   * - Returns null if no eligible bundle exists
-   */
+  // Picks the best bundle to deduct from.
+  // Enterprise is always preferred (unlimited). Otherwise, take the one
+  // with the most remaining messages.
   selectBundle(bundles: SubscriptionBundle[]): SubscriptionBundle | null {
     const sorted = [...bundles].sort(
       (a, b) => b.remainingMessages - a.remainingMessages,
     );
 
     for (const bundle of sorted) {
-      if (this.isEnterpriseUnlimited(bundle.tier)) {
-        return bundle;
-      }
-      if (bundle.remainingMessages > 0) {
-        return bundle;
-      }
+      if (this.isEnterpriseUnlimited(bundle.tier)) return bundle;
+      if (bundle.remainingMessages > 0) return bundle;
     }
 
     return null;
   }
 
-  /**
-   * Returns true when the given tier is ENTERPRISE (unlimited quota).
-   */
   isEnterpriseUnlimited(tier: string): boolean {
     return tier === QuotaPolicy.ENTERPRISE_TIER;
   }
