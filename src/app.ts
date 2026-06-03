@@ -85,7 +85,10 @@ export function createApp(): express.Application {
   // -------------------------------------------------------------------------
   app.use((req: Request, res: Response, next: NextFunction): void => {
     const mutating = ['POST', 'PATCH', 'PUT'];
-    if (mutating.includes(req.method) && !req.is('application/json')) {
+    // Allow requests with no body (Content-Length: 0 or no Content-Type)
+    const hasBody = req.headers['content-length'] !== '0' &&
+      (req.headers['content-type'] || req.headers['content-length']);
+    if (mutating.includes(req.method) && hasBody && !req.is('application/json')) {
       res.status(415).json({
         error: {
           code: 'UNSUPPORTED_MEDIA_TYPE',

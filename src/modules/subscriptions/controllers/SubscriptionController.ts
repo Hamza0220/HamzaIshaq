@@ -434,6 +434,13 @@ export function createAdminSubscriptionRouter(): Router {
    *       - Admin
    *     security:
    *       - bearerAuth: []
+   *     requestBody:
+   *       required: false
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             example: {}
    *     responses:
    *       200:
    *         description: Renewal job results
