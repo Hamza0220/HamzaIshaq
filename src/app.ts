@@ -17,38 +17,26 @@ import {
 } from './modules/subscriptions/controllers/SubscriptionController';
 import { createAdminRouter } from './modules/admin/AdminController';
 
-// ---------------------------------------------------------------------------
-// App factory
-// ---------------------------------------------------------------------------
-
 export function createApp(): express.Application {
   const app = express();
 
-  // -------------------------------------------------------------------------
-  // 1. Attach requestId to every request
-  // -------------------------------------------------------------------------
+  // Attach a unique requestId before anything else so it's available in all logs
   app.use(requestLogger);
 
-  // -------------------------------------------------------------------------
-  // 2. pino-http structured request logging
-  // -------------------------------------------------------------------------
+  // Structured request logging via pino-http. autoLogging is off because
+  // requestLogger already emits a log on response finish.
   app.use(
     pinoHttp({
       logger,
-      // Suppress the duplicate log — requestLogger already logs on finish
       autoLogging: false,
       genReqId: (req) => (req as Request).requestId,
     }),
   );
 
-  // -------------------------------------------------------------------------
-  // 3. Helmet — secure HTTP headers
-  // -------------------------------------------------------------------------
+  // Security headers
   app.use(helmet());
 
-  // -------------------------------------------------------------------------
-  // 4. CORS
-  // -------------------------------------------------------------------------
+  // CORS — only origins listed in ALLOWED_ORIGINS env var are permitted
   app.use(
     cors({
       origin: config.ALLOWED_ORIGINS.split(',').map((o) => o.trim()),
@@ -64,30 +52,25 @@ export function createApp(): express.Application {
     }),
   );
 
-  // -------------------------------------------------------------------------
-  // 5 & 6. Body parsers with 10 kb limit
-  // -------------------------------------------------------------------------
+  // Body parsers — 10 kb cap prevents request flooding
   app.use(express.json({ limit: '10kb' }));
   app.use(express.urlencoded({ extended: true, limit: '10kb' }));
 
-  // -------------------------------------------------------------------------
-  // 7. Global request timeout — 30 seconds
-  // -------------------------------------------------------------------------
+  // Hard timeout on every request — aborts after 30 s
   app.use(timeout('30s'));
   app.use((_req: Request, _res: Response, next: NextFunction) => {
-    // After the timeout fires, stop processing
     const req = _req as Request & { timedout?: boolean };
     if (!req.timedout) next();
   });
 
-  // -------------------------------------------------------------------------
-  // 8. Strict Content-Type validation for mutating methods
-  // -------------------------------------------------------------------------
+  // Reject anything that isn't application/json on mutating methods.
+  // Requests with no body (Content-Length: 0) are let through.
   app.use((req: Request, res: Response, next: NextFunction): void => {
     const mutating = ['POST', 'PATCH', 'PUT'];
-    // Allow requests with no body (Content-Length: 0 or no Content-Type)
-    const hasBody = req.headers['content-length'] !== '0' &&
+    const hasBody =
+      req.headers['content-length'] !== '0' &&
       (req.headers['content-type'] || req.headers['content-length']);
+
     if (mutating.includes(req.method) && hasBody && !req.is('application/json')) {
       res.status(415).json({
         error: {
@@ -101,12 +84,7 @@ export function createApp(): express.Application {
     next();
   });
 
-  // -------------------------------------------------------------------------
-  // Routes
-  // -------------------------------------------------------------------------
-
   // Health check — no auth required
-
   /**
    * @swagger
    * /health:
@@ -142,23 +120,22 @@ export function createApp(): express.Application {
     });
   });
 
-  // Swagger UI — available at /api-docs
+  // Swagger UI at /api-docs
   app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
     customSiteTitle: 'GGI Backend API Docs',
     swaggerOptions: { persistAuthorization: true },
   }));
 
-  // verifyToken → syncUser applied globally to all /api/v1/* protected routes.
-  // Individual route handlers then add nonce, rate-limit, validate as needed.
-  // Note: verifyToken + syncUser here ensures DB user exists before any handler runs.
+  // verifyToken + syncUser run globally on all /api/v1/* routes so every
+  // handler can rely on req.dbUser being populated. Individual routes add
+  // nonce, rate-limit, and validation on top as needed.
   app.use('/api/v1/chat', verifyToken, syncUser, createChatRouter());
   app.use('/api/v1/subscriptions', verifyToken, syncUser, createSubscriptionRouter());
-  // Admin subscriptions MUST be registered BEFORE /api/v1/admin to avoid prefix clash
+  // Admin subscriptions registered before /api/v1/admin to avoid prefix clash
   app.use('/api/v1/admin/subscriptions', verifyToken, syncUser, createAdminSubscriptionRouter());
   app.use('/api/v1/admin', verifyToken, syncUser, createAdminRouter());
-  // -------------------------------------------------------------------------
-  // Global error handler — MUST be last
-  // -------------------------------------------------------------------------
+
+  // Error handler must be the last middleware
   app.use(errorHandler);
 
   return app;
