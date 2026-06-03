@@ -8,3 +8,6 @@ flow-status.png
 test_token.txt
 test-api.ps1
 .playwright-mcp/
+*.png
+repo-*.png
+postman-*.png
